@@ -8,7 +8,7 @@ This is an early, partial port, not a feature-complete Linux release of upstream
 
 - Local video playback through Qt Multimedia.
 - Linux camera/capture-device and format selection.
-- Screen/window sharing for an external Remote Play client, using Qt's capture backend.
+- Direct X11/XWayland window capture for an external Remote Play client, plus separate screen sharing.
 - NVIDIA VFG **2× and 4×**, low/medium/high model selection, automatic scene-cut handling.
 - GPU output through CUDA/OpenGL interop, optional sharpening and fullscreen viewing.
 - Bounded frame mailboxes and explicit input/generated/submitted/drop counters.
@@ -42,7 +42,7 @@ See [Linux setup, PS5 connections and testing](docs/LINUX_PLAYER.md).
 
 - **SDR only.** HDR input is rejected when identified by the source metadata.
 - DLSS neural rendering, AI super resolution, HDR processing, built-in PS5 pairing, node editing and export have not been ported to this player.
-- PS5 Remote Play requires a separate client such as chiaki-ng. Physical PS5/capture-card and Remote Play integration have not yet been validated in this fork.
+- PS5 Remote Play requires a separate client such as chiaki-ng. Live PS5 window capture and frame generation have been smoke-tested locally; steady 120 FPS display output, latency and long-session reliability are unverified. HDMI capture cards have not been tested.
 - Frame generation adds latency and can introduce artifacts. It does not change the console's game simulation or control-response rate. Submitted frames are not measured physical display FPS.
 - Audio monitoring has no automatic compensation for the added video delay.
 - The current prototype maps input frames through Qt/CPU memory, loads the model on the GUI thread and has not been tuned for long sessions.

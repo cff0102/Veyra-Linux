@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QCommandLineParser>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLoggingCategory>
@@ -20,6 +21,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScreenCapture>
+#include <QWindowCapture>
 #include <QShortcut>
 #include <QSlider>
 #include <QVideoFrame>
@@ -53,6 +55,9 @@ int main(int argc,char** argv) {
     args.addOption({"test-output","Self-test artifact directory.","directory"});
     args.addOption({"demo","Show a synthetic 30 fps motion source."});
     args.addOption({"multiplier","Frame-generation multiplier: 1 (off), 2 or 4.","number","1"});
+    args.addOption({"capture-window","Capture the single window with this exact title (X11/XWayland).","title"});
+    args.addOption({"capture-fps","Window capture rate limit (Qt 6.12+). Match the game's real frame rate.","fps","60"});
+    args.addOption({"fullscreen","Start with picture-only fullscreen."});
     args.addOption({"quit-after","Exit after this many seconds (for smoke tests).","seconds"});
     args.addOption({"screenshot","Save this application window before timed exit.","file"});
     args.addPositionalArgument("video","Optional local video file.","[video]");
@@ -63,6 +68,12 @@ int main(int argc,char** argv) {
     }
     const int initialMultiplier=args.value("multiplier").toInt();
     if(initialMultiplier!=1 && initialMultiplier!=2 && initialMultiplier!=4) { qCritical()<<"Invalid multiplier"; return 2; }
+    bool captureFpsValid=false;
+    const int captureFps=args.value("capture-fps").toInt(&captureFpsValid);
+    if(!captureFpsValid || captureFps<1 || captureFps>240) { qCritical()<<"--capture-fps must be 1..240"; return 2; }
+#if QT_VERSION < QT_VERSION_CHECK(6, 12, 0)
+    if(args.isSet("capture-fps")) { qCritical()<<"--capture-fps requires Qt 6.12 or newer"; return 2; }
+#endif
     int quitSeconds=0;
     if(args.isSet("quit-after")) {
         bool valid=false; quitSeconds=args.value("quit-after").toInt(&valid);
@@ -77,11 +88,12 @@ int main(int argc,char** argv) {
     auto* formatBox=new QComboBox;
     auto* refresh=new QPushButton("Refresh devices");
     auto* capture=new QPushButton("Open capture card");
-    auto* screen=new QPushButton("Share window / screen");
+    auto* captureWindow=new QPushButton("Capture window");
+    auto* screen=new QPushButton("Share screen");
     auto* file=new QPushButton("Open video");
     auto* stop=new QPushButton("Stop");
     sourceRow->addWidget(cameraBox,1); sourceRow->addWidget(formatBox,1);
-    for(auto* button:{refresh,capture,screen,file,stop}) sourceRow->addWidget(button);
+    for(auto* button:{refresh,capture,captureWindow,screen,file,stop}) sourceRow->addWidget(button);
     layout->addLayout(sourceRow);
     auto* settings=new QHBoxLayout;
     auto* fg=new QComboBox; fg->addItem("Frame generation off",1); fg->addItem("NVIDIA VFG 2×",2); fg->addItem("NVIDIA VFG 4×",4);
@@ -115,6 +127,10 @@ int main(int argc,char** argv) {
     QAudioOutput playbackAudio;
     QAudioOutput captureAudio;
     QScreenCapture screenCapture;
+    QWindowCapture windowCapture;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+    windowCapture.setMaximumFrameRate(captureFps);
+#endif
     std::unique_ptr<QCamera> camera;
     std::unique_ptr<QAudioInput> audioInput;
     QTimer demo;
@@ -148,6 +164,7 @@ int main(int argc,char** argv) {
     auto stopSource=[&] {
         demo.stop(); player.stop(); player.setVideoSink(nullptr);
         screenCapture.stop(); session.setScreenCapture(nullptr);
+        windowCapture.stop(); session.setWindowCapture(nullptr);
         if(camera) camera->stop();
         session.setCamera(nullptr); camera.reset();
         session.setAudioInput(nullptr); audioInput.reset();
@@ -208,10 +225,42 @@ int main(int argc,char** argv) {
         session.setCamera(camera.get()); session.setVideoSink(&sink); applyAudio(); camera->start();
         message->setText("Capture started. Use the PS5 controller connected to the console.");
     });
+    auto openWindow=[&](const QString& title) {
+        if(QGuiApplication::platformName()!=QStringLiteral("xcb")) {
+            message->setText("Direct window capture requires X11/XWayland. Launch Veyra with QT_QPA_PLATFORM=xcb; the source must also use X11/XWayland.");
+            return;
+        }
+        QList<QCapturableWindow> windows;
+        QStringList descriptions;
+        for(const auto& candidate:QWindowCapture::capturableWindows()) {
+            if(!candidate.isValid() || candidate.description()==window.windowTitle()) continue;
+            if(!title.isEmpty() && candidate.description()!=title) continue;
+            windows.append(candidate); descriptions.append(candidate.description());
+        }
+        if(windows.isEmpty() || (!title.isEmpty() && windows.size()!=1)) {
+            message->setText("No unique matching window found. Keep the Remote Play window open on this desktop.");
+            return;
+        }
+        int index=0;
+        if(title.isEmpty()) {
+            bool accepted=false;
+            const auto selected=QInputDialog::getItem(&window,"Capture window","Window",descriptions,0,false,&accepted);
+            if(!accepted) return;
+            index=descriptions.indexOf(selected);
+            if(index<0) return;
+        }
+        stopSource();
+        session.setWindowCapture(&windowCapture); session.setVideoSink(&sink);
+        windowCapture.setWindow(windows[index]);
+        message->setText("Capturing "+descriptions[index]+". Keep audio and controller input in the Remote Play client.");
+        windowCapture.start();
+    };
+    QObject::connect(captureWindow,&QPushButton::clicked,[&] { openWindow({}); });
+    QObject::connect(&windowCapture,&QWindowCapture::errorOccurred,[&](QWindowCapture::Error,const QString& text){message->setText(text);qWarning()<<"Window capture:"<<text;});
     QObject::connect(screen,&QPushButton::clicked,[&] {
         stopSource(); session.setScreenCapture(&screenCapture); session.setVideoSink(&sink);
         screenCapture.start();
-        message->setText("Select the Remote Play window in the sharing dialog. Keep its audio/controller in the Remote Play client. Avoid sharing Veyra itself.");
+        message->setText("Select a screen in the sharing dialog. Do not display Veyra on the captured screen: that creates a feedback loop. Use Capture window for Remote Play.");
     });
     QObject::connect(&screenCapture,&QScreenCapture::errorOccurred,[&](QScreenCapture::Error,const QString& text){message->setText(text);});
     auto openFile=[&](const QString& path) {
@@ -224,7 +273,7 @@ int main(int argc,char** argv) {
     QObject::connect(&player,&QMediaPlayer::errorOccurred,[&](QMediaPlayer::Error,const QString& text){message->setText(text);});
     QObject::connect(help,&QPushButton::clicked,[&] {
         QMessageBox::information(&window,"PS5 on Linux",
-          "Remote Play: enable Settings → System → Remote Play on PS5. Pair a Linux Remote Play client such as chiaki-ng, then use Share window / screen to select its video window. Keep controller input and audio in that client.\n\n"
+          "Remote Play: enable Settings → System → Remote Play on PS5. Pair a Linux Remote Play client such as chiaki-ng. Run both clients with X11/XWayland, then use Capture window to select the Remote Play window. Keep controller input and audio in that client. Share screen captures an entire display and must not include Veyra itself.\n\n"
           "Capture card: PS5 HDMI OUT → card HDMI IN; card USB → PC. Disable PS5 Settings → System → HDMI → Enable HDCP. Select a Linux-compatible capture card and its supported format here, then Open capture card. Use SDR initially. The PC's display output shows the enhanced picture; card passthrough remains original.\n\n"
           "This experimental viewer supports NVIDIA video frame generation and sharpening. It does not yet port Veyra's neural rendering, HDR, node editor, or built-in PS5 pairing. Generated frames add latency. Audio is monitored without automatic video-delay compensation.");
     });
@@ -257,7 +306,9 @@ int main(int argc,char** argv) {
     });
     window.show();
     if(args.isSet("demo")) demo.start();
+    else if(args.isSet("capture-window")) openWindow(args.value("capture-window"));
     else if(!args.positionalArguments().isEmpty()) openFile(args.positionalArguments().first());
+    if(args.isSet("fullscreen")) setFullscreen(true);
     if(quitSeconds) {
         QTimer::singleShot(quitSeconds*1000,&app,[&] {
             if(args.isSet("screenshot")) window.grab().save(args.value("screenshot"));

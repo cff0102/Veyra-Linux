@@ -88,16 +88,29 @@ not Veyra's Windows/Chiaki integration:
    its [setup documentation](https://chiaki-ng.github.io/chiaki-ng/setup/).
    Complete pairing locally; do not publish account IDs or pairing credentials.
 3. Verify its picture, sound and controller first. Select an SDR stream.
-4. In Veyra choose **Share window / screen** and select the Remote Play window
-   in the desktop sharing dialog. Audio remains in chiaki-ng. Test whether your
-   client continues forwarding controller input while Veyra has focus.
-5. Avoid capturing the Veyra window itself. Minimized/occluded window capture
-   behavior depends on the compositor and portal. This path needs real-console
-   testing before any latency or reliability claim.
+4. Run chiaki-ng and Veyra using X11/XWayland and choose **Capture window**.
+   Select the Remote Play window. Qt can display a fallback `Window 0x...` name
+   for clients that do not set a legacy X11 title. **Share screen** is a separate
+   whole-display capture control; its Wayland portal does not offer windows.
+5. Audio remains in chiaki-ng. Keep its window open on the current desktop.
+   Check controller input with Veyra in front. Do not capture Veyra itself or
+   a display containing its preview, which creates a feedback loop.
 
-If the portal cannot provide a usable window capture, use a capture card or
-resolve the desktop capture configuration. Veyra does not silently fall back to
-an untested built-in PS5 session.
+For a window with the exact title `chiaki-ng`, this starts a 30 FPS capture with
+4× generation and picture-only fullscreen (the rate limit requires Qt 6.12+):
+
+```sh
+QT_QPA_PLATFORM=xcb XDG_SESSION_TYPE=x11 ./scripts/run-linux.sh \
+  --capture-window chiaki-ng --capture-fps 30 --multiplier 4 --fullscreen
+```
+
+The environment overrides apply only to the viewer process, including when the
+desktop itself runs Wayland. Match the capture rate to the game's actual motion
+rate, not a Remote Play stream carrying repeated frames. This asynchronous
+capture is not synchronized to the console and may repeat or miss a frame.
+Use 60 FPS capture and 2× for a game that actually renders at 60 FPS. These are
+requested processing rates, not verified physical display rates. A missing or
+ambiguous title produces a status message rather than selecting another window.
 
 ## Current implementation boundaries
 
@@ -140,6 +153,11 @@ host upload, inference and CUDA-to-GL copies.
 On the tested RTX 5080, generated object centers were 240.98, 249.38 and 258.45
 pixels against expected 239.5, 249.5 and 259.5 pixels. The 1080p processing sample
 averaged 2.28 ms/pair (max 2.34 ms). These are synthetic processing measurements,
-not physical 120 Hz display verification or capture-to-display latency. Quality
-and performance on GTA VI, real capture devices, Remote Play, other GPUs,
-compositors and long sessions remain unverified.
+not physical 120 Hz display verification or capture-to-display latency.
+
+Real PS5 Remote Play window capture was also smoke-tested on this machine with
+GTA VI: a 12-second run received 357 frames and generated 1,062 intermediate
+frames, and a screenshot confirmed the game picture in Veyra. This verifies
+capture and active generation, not a steady 120 FPS display rate, end-to-end
+latency, interpolation quality, or long-session reliability. HDMI capture cards,
+other GPUs and other compositors remain unverified.
