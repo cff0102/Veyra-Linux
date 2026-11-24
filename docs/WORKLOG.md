@@ -1683,3 +1683,34 @@ Windows 用 `scripts/acceptance/build-recording-handoff.py --task codex-communit
 在 E:/项目/Veyra/worktrees/magewell-low-latency-20261119 从综合测试版 2be802ee 隔离修复，产品提交 4e29ff4a。build-recording-handoff.py --task codex-magewell-low-latency-20261119 --jobs 2 启用原版 Magewell SDK 和既有 libdovi、Chiaki 固定输入，首次完整构建 336.7s，提交后增量构建 8.4s，最终回执 build-20261119-082706/receipt.json。部署脚本独立复制既有 QA stage，91 个着色器逐哈希核对。8 个预期结果均通过，包括无卡探针按预期返回 1，DLSS/VFG 四组 P010 回归 debugErrors=0，以及产品采集对话框启动。extract.py --check 缺失和占位符问题均为 0。
 
 初次启动自动生成的约 2.7 MB Qt 缓存已从 C 盘对应本次唯一摘要路径移至 E 盘任务 tmp。显式重定向后复测通过，手测入口默认采用同一隔离策略。实卡端到端帧率和延迟需现场验证，未改运行库、用户配置、驱动或发行包。可运行入口在 tests/codex-magewell-low-latency-20261119/启动美乐威低延迟测试版.cmd。
+
+
+### 2026-11-23 Linux direct decoded frames and bounded interpolation waiting
+
+Added an optional pinned Chiaki source patch and private, single-slot SDR frame
+bridge, avoiding window capture. The launcher reuses local registration and
+starts 2× generation with a 4 ms interpolation waiting cap. Late intermediate
+frames are skipped. Details, dependencies and license notices are in
+[LINUX_DIRECT_FRAMES.md](LINUX_DIRECT_FRAMES.md).
+
+On CachyOS/RTX 5080, built both clients with at most two jobs. GPU self-test
+passed 2×/4×, color/cut/repeat and teardown checks; a six-second synthetic
+latency-priority run received 171 and submitted 340 frames with zero mailbox
+drops. Bridge tests passed process sharing, contention, full-range black/white,
+HDR rejection, exclusive creation and receiver replacement. Initial white-level
+rounding was corrected using full chroma interpolation in swscale. The final
+live PS5 ten-second test received 607 frames; decoder-delivery-to-Qt-swap
+averages settled around 4.3–4.5 ms, with interval p95 around 4.7–6.1 ms.
+These exclude physical scanout and controller/game/network latency and do not
+establish native-Chiaki parity. Final launcher received 180 decoded frames in
+three seconds; invoking it again reused the session. The desktop was locked
+during final screenshot inspection, so final on-screen appearance was not
+verified. Earlier stale viewers were stopped before the capped live test.
+
+Commands included `cmake --build ../Veyra-local/build/native --target
+veyra-linux -j2`, `bash scripts/build-chiaki-direct.sh`, the documented bridge
+test, native `--gpu-self-test`, and `--demo --multiplier 2 --latency-priority
+--interpolation-budget-ms 4 --timing-log --quit-after 6`. Logs, test outputs,
+downloads, source dependencies and binaries remain in sibling `Veyra-local`.
+No credentials, private configurations or proprietary runtime files are
+included in the source changes.

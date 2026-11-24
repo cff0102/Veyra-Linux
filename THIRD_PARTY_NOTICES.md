@@ -1,5 +1,16 @@
 # Third-party dependencies
 
+## Optional Linux Chiaki decoded-frame bridge
+
+The optional build helper fetches chiaki-ng v1.10.1 at
+`f30da0aaeb96fc0026cc03683153f682352e7d7c` from
+https://github.com/chiaki-ng/chiaki-ng and applies the small source patch in
+`linux/chiaki/chiaki-ng-v1.10.1.patch`. Chiaki's authors retain their copyrights;
+its AGPLv3 license and OpenSSL exception remain in the downloaded source.
+No Chiaki binary is included. Bridge headers and tests are GPL-3.0-or-later.
+See `docs/LINUX_DIRECT_FRAMES.md` for source, build and distribution details.
+The local Vulkan-Headers checkout retains its upstream Apache-2.0/MIT notices.
+
 ## Live subtitle translation (2026-11-20)
 
 Veyra's native subtitle translation adapts the Live Captions integration and

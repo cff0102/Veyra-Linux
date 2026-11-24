@@ -79,6 +79,10 @@ This link illustrates wiring; it is not a Linux-driver endorsement of that card.
 
 ## PS5 over Remote Play
 
+For the lowest tested added delay, use the optional
+[direct decoded-frame path](LINUX_DIRECT_FRAMES.md). The window-capture path
+below remains available with an unmodified Chiaki client.
+
 A capture card is optional. This first port uses an external Remote Play client,
 not Veyra's Windows/Chiaki integration:
 
@@ -138,6 +142,12 @@ estimates the timestamp of the displayed interpolated content from its two
 source receipts; `latest-receipt-to-swap` measures time since the newer source
 receipt. Both exclude network/decode, capture sampling delay, and physical
 screen scanout. They are diagnostics, not controller-to-screen latency.
+
+`--interpolation-budget-ms 4` with `--latency-priority` caps scheduled waiting
+for the latest endpoint. Work that exceeds this budget skips intermediates;
+the budget is not a guarantee of total processing or display latency. It
+reduces smoothing and does not promise a uniform 120 FPS output. Zero disables
+the additional cap.
 
 ## Current implementation boundaries
 

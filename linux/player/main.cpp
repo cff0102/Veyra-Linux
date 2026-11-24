@@ -1,4 +1,5 @@
 #include "Preview.h"
+#include "SharedFrames.h"
 #include <QApplication>
 #include <QAudioInput>
 #include <QAudioDevice>
@@ -57,14 +58,21 @@ int main(int argc,char** argv) {
     args.addOption({"demo","Show a synthetic 30 fps motion source."});
     args.addOption({"multiplier","Frame-generation multiplier: 1 (off), 2 or 4.","number","1"});
     args.addOption({"capture-window","Capture the single window with this exact title (X11/XWayland).","title"});
+    args.addOption({"direct-frames","Create a private local RGBA bridge for the patched Chiaki decoder.","path"});
     args.addOption({"capture-fps","Window capture rate limit (Qt 6.12+). Higher rates reduce sampling wait but cost more CPU.","fps","60"});
     args.addOption({"fullscreen","Start with picture-only fullscreen."});
     args.addOption({"latency-priority","Present newer frames sooner, skipping late intermediate frames."});
+    args.addOption({"interpolation-budget-ms","Cap interpolation waiting in latency-priority mode; reduces smoothing (0 disables cap).","ms","0"});
     args.addOption({"timing-log","Log receipt-to-swap timing; excludes network, capture sampling and physical scanout."});
     args.addOption({"quit-after","Exit after this many seconds (for smoke tests).","seconds"});
     args.addOption({"screenshot","Save this application window before timed exit.","file"});
     args.addPositionalArgument("video","Optional local video file.","[video]");
     args.process(app);
+    bool budgetValid=false;
+    const int interpolationBudget=args.value("interpolation-budget-ms").toInt(&budgetValid);
+    if(!budgetValid || interpolationBudget<0 || interpolationBudget>100 || (interpolationBudget && !args.isSet("latency-priority"))) {
+        qCritical()<<"--interpolation-budget-ms must be 0..100 and requires --latency-priority";return 2;
+    }
     if(args.isSet("latency-priority")) {
         // The desktop compositor still controls scanout; avoid adding a
         // separate application swap wait to the live capture path.
@@ -123,6 +131,7 @@ int main(int argc,char** argv) {
     auto* preview=new Preview;
     preview->setLatencyPriority(lowLatency->isChecked());
     preview->setTimingEnabled(args.isSet("timing-log"));
+    preview->setInterpolationBudget(interpolationBudget*1000LL);
     layout->addWidget(preview,1);
     auto* message=new QLabel("Choose a capture card, share a Remote Play window, or open a video. SDR input only.");
     message->setWordWrap(true); layout->addWidget(message);
@@ -148,6 +157,10 @@ int main(int argc,char** argv) {
     QTimer demo;
     demo.setTimerType(Qt::PreciseTimer); demo.setInterval(33);
     QElapsedTimer sourceClock; sourceClock.start();
+    veyra::bridge::Mapping directFrames;
+    QTimer directTimer;
+    directTimer.setTimerType(Qt::PreciseTimer);directTimer.setInterval(1);
+    uint64_t directSequence=0;
     // Direct producer callbacks store exactly one frame and queue one GUI
     // drain; slow inference cannot accumulate per-frame Qt events.
     std::mutex mailboxMutex;
@@ -188,6 +201,7 @@ int main(int argc,char** argv) {
         }
     },Qt::DirectConnection);
     auto stopSource=[&] {
+        directTimer.stop();directFrames.close();directSequence=0;
         demo.stop(); player.stop(); player.setVideoSink(nullptr);
         screenCapture.stop(); session.setScreenCapture(nullptr);
         windowCapture.stop(); session.setWindowCapture(nullptr);
@@ -334,7 +348,29 @@ int main(int argc,char** argv) {
         preview->submit(std::move(image),qint64(demoIndex++)*33333);
     });
     window.show();
-    if(args.isSet("demo")) demo.start();
+    if(args.isSet("direct-frames")) {
+        if(!directFrames.open(args.value("direct-frames").toStdString(),true)) {
+            qCritical()<<"Cannot create private frame bridge; choose a new path in your runtime directory.";
+            return 2;
+        }
+        message->setText("Waiting for direct decoded PS5 frames. Audio and controller input remain in Chiaki.");
+        QObject::connect(&directTimer,&QTimer::timeout,[&] {
+            QImage image;qint64 pts=0,receipt=0;
+            {
+                veyra::bridge::Lock lock(directFrames);
+                if(!lock || !directFrames.compatible()) return;
+                const auto& h=directFrames.header();
+                if(!h.sequence || h.sequence==directSequence) return;
+                if(h.width<16 || h.width>3840 || h.height<16 || h.height>2160 ||
+                   h.stride!=h.width*4 || h.bytes!=h.stride*h.height || h.bytes>veyra::bridge::PixelBytes) return;
+                image=QImage(directFrames.pixels(),h.width,h.height,h.stride,QImage::Format_RGBA8888).copy();
+                pts=h.ptsUs;receipt=h.receivedUs;directSequence=h.sequence;
+            }
+            preview->submit(std::move(image),pts,monotonicUs()-receipt);
+        });
+        directTimer.start();
+    }
+    else if(args.isSet("demo")) demo.start();
     else if(args.isSet("capture-window")) openWindow(args.value("capture-window"));
     else if(!args.positionalArguments().isEmpty()) openFile(args.positionalArguments().first());
     if(args.isSet("fullscreen")) setFullscreen(true);

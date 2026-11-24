@@ -9,6 +9,7 @@ This is an early, partial port, not a feature-complete Linux release of upstream
 - Local video playback through Qt Multimedia.
 - Linux camera/capture-device and format selection.
 - Direct X11/XWayland window capture for an external Remote Play client, plus separate screen sharing.
+- Optional [direct decoded-frame bridge](docs/LINUX_DIRECT_FRAMES.md) from a local Chiaki build, avoiding window recapture.
 - NVIDIA VFG **2× and 4×**, low/medium/high model selection, automatic scene-cut handling.
 - GPU output through CUDA/OpenGL interop, optional sharpening and fullscreen viewing.
 - Bounded frame mailboxes and explicit input/generated/submitted/drop counters.

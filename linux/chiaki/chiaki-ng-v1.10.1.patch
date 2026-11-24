@@ -1,0 +1,38 @@
+diff --git a/gui/CMakeLists.txt b/gui/CMakeLists.txt
+index 7e777e1..f670673 100755
+--- a/gui/CMakeLists.txt
++++ b/gui/CMakeLists.txt
+@@ -159,3 +159,11 @@ install(TARGETS chiaki
+ install(FILES chiaking.desktop DESTINATION share/applications)
+ install(FILES chiaking.png DESTINATION share/icons/hicolor/512x512/apps)
+ install(FILES io.github.streetpea.Chiaki4deck.appdata.xml DESTINATION share/metainfo)
++
++set(VEYRA_FRAME_BRIDGE_DIR "" CACHE PATH "Optional Veyra frame bridge headers")
++if(VEYRA_FRAME_BRIDGE_DIR)
++  pkg_check_modules(VEYRA_SWSCALE REQUIRED libswscale IMPORTED_TARGET)
++  target_include_directories(chiaki PRIVATE "${VEYRA_FRAME_BRIDGE_DIR}")
++  target_compile_definitions(chiaki PRIVATE VEYRA_FRAME_BRIDGE)
++  target_link_libraries(chiaki PkgConfig::VEYRA_SWSCALE)
++endif()
+diff --git a/gui/src/qmlbackend.cpp b/gui/src/qmlbackend.cpp
+index d188a79..1b6c63e 100644
+--- a/gui/src/qmlbackend.cpp
++++ b/gui/src/qmlbackend.cpp
+@@ -1,4 +1,7 @@
+ #include "qmlbackend.h"
++#ifdef VEYRA_FRAME_BRIDGE
++#include "veyra_frame_sender.h"
++#endif
+ #include "qmlsettings.h"
+ #include "qmlmainwindow.h"
+ #include "streamsession.h"
+@@ -1152,6 +1155,9 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
+             frame.recovered = true;
+         }
+ 
++#ifdef VEYRA_FRAME_BRIDGE
++        veyra::bridge::sendFrame(frame.frame, static_cast<int64_t>(frame.pts * 1000000.0), prepare_begin_us);
++#endif
+         const qint64 delivery_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+         QmlMainWindow *target_window = window;
+         QMetaObject::invokeMethod(target_window, [target_window, frame, frames_lost, delivery_us]() mutable {

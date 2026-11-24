@@ -156,6 +156,8 @@ void Preview::paintGL() {
                     batch_=vfg_.process(previous_,next);
                     generated+=multiplier_-1;
                     duration_=std::clamp<qint64>(delta,8000,100000);
+                    if(latencyPriority_ && interpolationBudgetUs_>0)
+                        duration_=std::min(duration_,interpolationBudgetUs_*multiplier_/(multiplier_-1));
                     // Re-anchor to the live source arrival. Extrapolating the
                     // media PTS indefinitely drifts when capture delivery and
                     // the compositor clock differ, hiding all intermediate frames.

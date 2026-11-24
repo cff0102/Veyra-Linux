@@ -18,6 +18,7 @@ public:
     void setDeduplicate(bool enabled) { deduplicate_=enabled; }
     void setLatencyPriority(bool enabled) { latencyPriority_=enabled; clearSource(); }
     void setTimingEnabled(bool enabled) { timingEnabled_=enabled; }
+    void setInterpolationBudget(qint64 microseconds) { interpolationBudgetUs_=microseconds; }
     QString takeTimingSummary();
     std::function<void(QString)> report;
     std::function<void()> failed;
@@ -41,6 +42,7 @@ private:
     qint64 previousPts_=-1, pendingPts_=-1, epoch_=0, duration_=33333;
     qint64 previousArrival_=0, pendingArrival_=0, batchFirstArrival_=0, batchLastArrival_=0;
     qint64 presentedContentArrival_=0, presentedLatestArrival_=0;
+    qint64 interpolationBudgetUs_=0;
     std::vector<qint64> contentAges_, latestAges_;
     std::vector<GLuint> batch_;
     int displayed_=-1;
