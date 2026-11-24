@@ -12,6 +12,7 @@ This is an early, partial port, not a feature-complete Linux release of upstream
 - NVIDIA VFG **2× and 4×**, low/medium/high model selection, automatic scene-cut handling.
 - GPU output through CUDA/OpenGL interop, optional sharpening and fullscreen viewing.
 - Bounded frame mailboxes and explicit input/generated/submitted/drop counters.
+- Optional latency-priority scheduling with receipt-to-swap diagnostics for tuning live capture.
 
 Built and tested on **CachyOS x86-64 with an RTX 5080**. Other distributions are intended targets, but have not been validated. The NVIDIA runtime, GPU driver, Qt version and desktop capture support matter more than the distro name.
 

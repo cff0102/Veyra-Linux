@@ -31,6 +31,7 @@
 #include <mutex>
 #include <optional>
 #include <cstdio>
+#include <chrono>
 
 using veyra::linuxplayer::Preview;
 
@@ -56,12 +57,19 @@ int main(int argc,char** argv) {
     args.addOption({"demo","Show a synthetic 30 fps motion source."});
     args.addOption({"multiplier","Frame-generation multiplier: 1 (off), 2 or 4.","number","1"});
     args.addOption({"capture-window","Capture the single window with this exact title (X11/XWayland).","title"});
-    args.addOption({"capture-fps","Window capture rate limit (Qt 6.12+). Match the game's real frame rate.","fps","60"});
+    args.addOption({"capture-fps","Window capture rate limit (Qt 6.12+). Higher rates reduce sampling wait but cost more CPU.","fps","60"});
     args.addOption({"fullscreen","Start with picture-only fullscreen."});
+    args.addOption({"latency-priority","Present newer frames sooner, skipping late intermediate frames."});
+    args.addOption({"timing-log","Log receipt-to-swap timing; excludes network, capture sampling and physical scanout."});
     args.addOption({"quit-after","Exit after this many seconds (for smoke tests).","seconds"});
     args.addOption({"screenshot","Save this application window before timed exit.","file"});
     args.addPositionalArgument("video","Optional local video file.","[video]");
     args.process(app);
+    if(args.isSet("latency-priority")) {
+        // The desktop compositor still controls scanout; avoid adding a
+        // separate application swap wait to the live capture path.
+        format.setSwapInterval(0); QSurfaceFormat::setDefaultFormat(format);
+    }
     if(args.isSet("gpu-self-test")) {
         if(args.value("test-output").isEmpty()) { qCritical()<<"--test-output is required"; return 2; }
         return veyra::linuxplayer::gpuSelfTest(args.value("runtime"),args.value("test-output"));
@@ -100,10 +108,12 @@ int main(int argc,char** argv) {
     fg->setCurrentIndex(fg->findData(initialMultiplier));
     auto* quality=new QComboBox; quality->addItems({"Low model","Medium model","High model"});
     auto* duplicate=new QCheckBox("Skip identical frames"); duplicate->setChecked(true);
+    auto* lowLatency=new QCheckBox("Latency priority"); lowLatency->setChecked(args.isSet("latency-priority"));
+    lowLatency->setToolTip("Present newer frames sooner; late intermediate frames may be skipped. Does not remove interpolation latency.");
     auto* sharpen=new QSlider(Qt::Horizontal); sharpen->setRange(0,100); sharpen->setMaximumWidth(120);
     auto* audioBox=new QComboBox;
     auto* help=new QPushButton("PS5 setup");
-    settings->addWidget(fg); settings->addWidget(quality); settings->addWidget(duplicate);
+    settings->addWidget(fg); settings->addWidget(quality); settings->addWidget(duplicate); settings->addWidget(lowLatency);
     settings->addWidget(new QLabel("Sharpen")); settings->addWidget(sharpen);
     settings->addWidget(new QLabel("Capture audio")); settings->addWidget(audioBox,1); settings->addWidget(help);
     layout->addLayout(settings);
@@ -111,6 +121,8 @@ int main(int argc,char** argv) {
     runtime->setPlaceholderText("NVIDIA Linux VFX runtime directory (only needed for frame generation)");
     layout->addWidget(runtime);
     auto* preview=new Preview;
+    preview->setLatencyPriority(lowLatency->isChecked());
+    preview->setTimingEnabled(args.isSet("timing-log"));
     layout->addWidget(preview,1);
     auto* message=new QLabel("Choose a capture card, share a Remote Play window, or open a video. SDR input only.");
     message->setWordWrap(true); layout->addWidget(message);
@@ -136,21 +148,24 @@ int main(int argc,char** argv) {
     QTimer demo;
     demo.setTimerType(Qt::PreciseTimer); demo.setInterval(33);
     QElapsedTimer sourceClock; sourceClock.start();
-    // Direct producer callbacks store exactly one frame. The GUI polls this
-    // mailbox; slow model inference cannot accumulate queued Qt frame signals.
+    // Direct producer callbacks store exactly one frame and queue one GUI
+    // drain; slow inference cannot accumulate per-frame Qt events.
     std::mutex mailboxMutex;
     std::optional<QVideoFrame> mailbox;
+    qint64 mailboxArrival=0;
+    auto monotonicUs=[] {
+        return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
     quint64 mailboxDrops=0;
-    auto connection=QObject::connect(&sink,&QVideoSink::videoFrameChanged,&sink,[&](const QVideoFrame& frame) {
-        std::lock_guard lock(mailboxMutex);
-        if(mailbox) ++mailboxDrops;
-        mailbox=frame;
-    },Qt::DirectConnection);
-    QTimer ingest;
-    ingest.setTimerType(Qt::PreciseTimer); ingest.setInterval(2);
-    QObject::connect(&ingest,&QTimer::timeout,[&] {
+    bool ingestScheduled=false;
+    auto ingestFrame=[&] {
         std::optional<QVideoFrame> frame;
-        { std::lock_guard lock(mailboxMutex); frame=std::move(mailbox); mailbox.reset(); }
+        qint64 arrival;
+        {
+            std::lock_guard lock(mailboxMutex);
+            frame=std::move(mailbox); mailbox.reset(); arrival=mailboxArrival;
+            ingestScheduled=false;
+        }
         if(!frame || !frame->isValid()) return;
         const auto transfer=frame->surfaceFormat().colorTransfer();
         if(transfer==QVideoFrameFormat::ColorTransfer_ST2084 || transfer==QVideoFrameFormat::ColorTransfer_STD_B67) {
@@ -158,9 +173,20 @@ int main(int argc,char** argv) {
         }
         auto image=frame->toImage().convertToFormat(QImage::Format_RGBA8888);
         if(image.isNull()) { message->setText("Could not map the captured frame to RGBA."); return; }
-        preview->submit(std::move(image),frame->startTime()>=0 ? frame->startTime() : sourceClock.nsecsElapsed()/1000);
-    });
-    ingest.start();
+        preview->submit(std::move(image),frame->startTime()>=0 ? frame->startTime() : sourceClock.nsecsElapsed()/1000,monotonicUs()-arrival);
+    };
+    auto connection=QObject::connect(&sink,&QVideoSink::videoFrameChanged,&sink,[&](const QVideoFrame& frame) {
+        std::lock_guard lock(mailboxMutex);
+        if(mailbox) ++mailboxDrops;
+        mailbox=frame;
+        mailboxArrival=monotonicUs();
+        // Wake the GUI immediately, with at most one queued drain. New frames
+        // replace the mailbox rather than adding per-frame GUI events.
+        if(!ingestScheduled) {
+            ingestScheduled=true;
+            QMetaObject::invokeMethod(&sink,ingestFrame,Qt::QueuedConnection);
+        }
+    },Qt::DirectConnection);
     auto stopSource=[&] {
         demo.stop(); player.stop(); player.setVideoSink(nullptr);
         screenCapture.stop(); session.setScreenCapture(nullptr);
@@ -203,6 +229,7 @@ int main(int argc,char** argv) {
     QObject::connect(quality,&QComboBox::currentIndexChanged,[&]{apply();});
     QObject::connect(runtime,&QLineEdit::editingFinished,[&]{apply();});
     QObject::connect(duplicate,&QCheckBox::toggled,[&](bool value){preview->setDeduplicate(value);});
+    QObject::connect(lowLatency,&QCheckBox::toggled,[&](bool value){preview->setLatencyPriority(value);});
     QObject::connect(sharpen,&QSlider::valueChanged,[&](int value){preview->setSharpen(value/100.f);});
     preview->report=[&](QString value){message->setText(value); qInfo().noquote()<<value;};
     preview->failed=[&]{QSignalBlocker block(fg);fg->setCurrentIndex(0);};
@@ -293,6 +320,8 @@ int main(int argc,char** argv) {
         quint64 overwritten; {std::lock_guard lock(mailboxMutex); overwritten=mailboxDrops;}
         counters->setText(QString("Frames received: %1 • duplicates skipped: %2 • generated: %3 • submitted: %4 • dropped: %5  |  Submitted counts are not physical display FPS. F11: fullscreen")
           .arg(preview->received).arg(preview->duplicates).arg(preview->generated).arg(preview->submitted).arg(preview->dropped+overwritten));
+        const auto timing=preview->takeTimingSummary();
+        if(!timing.isEmpty()) qInfo().noquote()<<timing;
     }); statistics.start();
     int demoIndex=0;
     QObject::connect(&demo,&QTimer::timeout,[&] {

@@ -105,12 +105,39 @@ QT_QPA_PLATFORM=xcb XDG_SESSION_TYPE=x11 ./scripts/run-linux.sh \
 ```
 
 The environment overrides apply only to the viewer process, including when the
-desktop itself runs Wayland. Match the capture rate to the game's actual motion
-rate, not a Remote Play stream carrying repeated frames. This asynchronous
-capture is not synchronized to the console and may repeat or miss a frame.
-Use 60 FPS capture and 2× for a game that actually renders at 60 FPS. These are
-requested processing rates, not verified physical display rates. A missing or
-ambiguous title produces a status message rather than selecting another window.
+desktop itself runs Wayland. This asynchronous capture is not synchronized to
+the console and may repeat or miss a frame. These are requested processing
+rates, not verified physical display rates. A missing or ambiguous title
+produces a status message rather than selecting another window.
+
+For interactive play, prefer this responsiveness profile over 30 FPS capture:
+
+```sh
+QT_QPA_PLATFORM=xcb XDG_SESSION_TYPE=x11 ./scripts/run-linux.sh \
+  --capture-window chiaki-ng --capture-fps 60 --multiplier 2 \
+  --latency-priority --fullscreen
+```
+
+Capturing a 60 FPS Remote Play window at 60 rather than 30 FPS reduces the wait
+for its next sample even if the game renders at 30 FPS. The tradeoff is less
+useful interpolation between the game's unique frames; a repeated source frame
+does not become new game motion. The latency-priority scheduler skips the old
+endpoint, anchors deadlines before conversion/inference, and skips intermediate
+frames whose deadlines have passed. The command-line flag also requests swap
+interval zero; the compositor still controls screen presentation. The checkbox
+changes scheduling only; swap interval is selected when the app starts.
+
+Frame delivery uses a coalesced event and latest-frame mailbox instead of a
+polling timer. Neither this nor frame generation can match native Remote Play's
+latency: capture and interpolation add work and interpolation requires a later
+source frame. Use chiaki-ng directly when minimum latency matters more than
+smoothing.
+
+Add `--timing-log` to record Qt frame-receipt-to-swap measurements. `content-age`
+estimates the timestamp of the displayed interpolated content from its two
+source receipts; `latest-receipt-to-swap` measures time since the newer source
+receipt. Both exclude network/decode, capture sampling delay, and physical
+screen scanout. They are diagnostics, not controller-to-screen latency.
 
 ## Current implementation boundaries
 
@@ -161,3 +188,13 @@ frames, and a screenshot confirmed the game picture in Veyra. This verifies
 capture and active generation, not a steady 120 FPS display rate, end-to-end
 latency, interpolation quality, or long-session reliability. HDMI capture cards,
 other GPUs and other compositors remain unverified.
+
+A local latency comparison on the same live PS5 window measured approximately
+43 ms estimated content age with 30 FPS capture / 4× / normal scheduling, versus
+12 ms with 60 FPS capture / 2× / latency priority and event-driven delivery.
+The latter showed approximately 8 ms from latest frame receipt to Qt swap,
+and zero source-mailbox drops in the short test. Capture at 120 FPS increased
+work and reduced presentation cadence in this setup, so 60 FPS was retained.
+The GPU correctness self-test and synthetic 30 FPS / 4× playback test passed.
+These are short local measurements with the exclusions above, not guarantees
+of native Chiaki latency or 120 distinct game-motion frames per second.

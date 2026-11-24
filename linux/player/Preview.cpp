@@ -20,6 +20,17 @@ Preview::Preview(QWidget* parent):QOpenGLWidget(parent) {
         if (!pending_.isNull() || nextFrameDue) update();
     });
     timer_.start();
+    connect(this,&QOpenGLWidget::frameSwapped,this,[this] {
+        if (!timingEnabled_ || !awaitingSwap_) return;
+        awaitingSwap_=false;
+        const auto now=clock_.nsecsElapsed()/1000;
+        // Application/compositor submission timing, not physical scanout or
+        // controller-to-screen latency. Interpolated content time is estimated.
+        if (contentAges_.size()<4096) {
+            contentAges_.push_back(std::max<qint64>(0,now-presentedContentArrival_));
+            latestAges_.push_back(std::max<qint64>(0,now-presentedLatestArrival_));
+        }
+    });
 }
 Preview::~Preview() { cleanup(); }
 void Preview::cleanup() {
@@ -35,6 +46,7 @@ void Preview::cleanup() {
 void Preview::clearSource() {
     pending_=QImage(); previous_=QImage();
     pendingPts_=previousPts_=-1;
+    awaitingSwap_=false;
     batch_.clear(); textureSize_=QSize(); dirty_=true; displayed_=-1;
     update();
 }
@@ -42,13 +54,27 @@ void Preview::configure(QString runtime,int multiplier,int quality) {
     runtime_=std::move(runtime); multiplier_=multiplier; quality_=quality;
     clearSource();
 }
-void Preview::submit(QImage image,qint64 pts) {
+void Preview::submit(QImage image,qint64 pts,qint64 deliveryAgeUs) {
     if (image.isNull()) return;
     ++received;
     if (!pending_.isNull()) ++dropped;
     pending_=std::move(image);
     pendingPts_=pts;
+    pendingArrival_=clock_.nsecsElapsed()/1000-std::max<qint64>(0,deliveryAgeUs);
     update();
+}
+QString Preview::takeTimingSummary() {
+    if (contentAges_.empty()) return {};
+    auto summarize=[](std::vector<qint64>& samples) {
+        std::sort(samples.begin(),samples.end());
+        const double average=std::accumulate(samples.begin(),samples.end(),0.0)/samples.size()/1000.0;
+        const double p95=samples[(samples.size()-1)*95/100]/1000.0;
+        return QString("avg=%1ms p95=%2ms").arg(average,0,'f',2).arg(p95,0,'f',2);
+    };
+    const auto result=QString("Presentation timing: samples=%1 content-age %2 latest-receipt-to-swap %3")
+        .arg(contentAges_.size()).arg(summarize(contentAges_)).arg(summarize(latestAges_));
+    contentAges_.clear(); latestAges_.clear();
+    return result;
 }
 void Preview::initializeGL() {
     if (!initializeOpenGLFunctions()) {
@@ -112,6 +138,7 @@ void Preview::paintGL() {
     if (!pending_.isNull() && gpuReady) {
         QImage next=std::move(pending_);
         const auto pts=pendingPts_;
+        const auto arrival=pendingArrival_;
         pending_=QImage();
         if (deduplicate_ && next==previous_ && pts>previousPts_ && pts-previousPts_<100000) {
             ++duplicates;
@@ -132,7 +159,12 @@ void Preview::paintGL() {
                     // Re-anchor to the live source arrival. Extrapolating the
                     // media PTS indefinitely drifts when capture delivery and
                     // the compositor clock differ, hiding all intermediate frames.
-                    epoch_=clock_.nsecsElapsed()/1000;
+                    // Latency priority skips the already-visible A endpoint.
+                    // Anchor to receipt before conversion/inference so slow
+                    // work consumes the budget rather than extending it.
+                    epoch_=latencyPriority_ ? arrival-duration_/multiplier_ : clock_.nsecsElapsed()/1000;
+                    batchFirstArrival_=previousArrival_;
+                    batchLastArrival_=arrival;
                     displayed_=-1;
                 } else {
                     // A pause or dropped capture interval invalidates the pair,
@@ -143,9 +175,11 @@ void Preview::paintGL() {
                     glPixelStorei(GL_UNPACK_ALIGNMENT,4);
                     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,next.width(),next.height(),0,GL_RGBA,GL_UNSIGNED_BYTE,next.constBits());
                     ++submitted;
+                    presentedContentArrival_=presentedLatestArrival_=arrival;
+                    awaitingSwap_=true;
                 }
                 textureSize_=next.size();
-                previous_=std::move(next); previousPts_=pts;
+                previous_=std::move(next); previousPts_=pts; previousArrival_=arrival;
             } catch (const std::exception& error) {
                 multiplier_=1; vfg_.reset(); modelSize_=QSize(); batch_.clear();
                 previous_=QImage(); textureSize_=QSize();
@@ -160,7 +194,12 @@ void Preview::paintGL() {
         now=clock_.nsecsElapsed()/1000;
         const int index=std::clamp<int>(int((now-epoch_)*multiplier_/duration_),0,multiplier_);
         texture=batch_[index];
-        if (index!=displayed_) { ++submitted; displayed_=index; }
+        if (index!=displayed_) {
+            ++submitted; displayed_=index;
+            presentedContentArrival_=batchFirstArrival_+(batchLastArrival_-batchFirstArrival_)*index/multiplier_;
+            presentedLatestArrival_=batchLastArrival_;
+            awaitingSwap_=true;
+        }
     }
     const int w=int(width()*devicePixelRatioF()),h=int(height()*devicePixelRatioF());
     QSize view=textureSize_; view.scale(w,h,Qt::KeepAspectRatio);
