@@ -178,6 +178,28 @@ No dependency source, model, SDK, library or DLL is added to Veyra source Git.
 
 NVIDIA SDKs and runtimes are excluded from source control. The publisher-authorized experimental Release package contains only selected runtime DLLs and applicable notices, as documented in `docs/RUNTIME_COMPONENTS_0.0.2.md`. This is not vendor endorsement or a general redistribution grant. ReShade/RenoDX add-ons are not loaded or distributed by the product.
 
+## Native Linux VFG adapter (2026-11-23)
+
+`linux/player/Vfg.cpp` adapts Veyra's public NVIDIA VFX/NvCVImage C API
+sequencing to Linux dynamic libraries, CUDA-owned input buffers and CUDA/OpenGL
+texture interop. It does not contain proprietary SDK structs, headers, models
+or runtime binaries. The standalone UI uses Qt and the installed Qt Multimedia
+backend. Original source licenses continue to apply.
+
+`scripts/prepare-linux-runtime.py` fetches the unmodified official NVIDIA Linux
+VFX 0.2.0.0 wheel and CUDA runtime/header 12.9.79 wheel into an external local
+directory. Their SHA-256 identities, source URLs, installation layout and
+validation scope are documented in `docs/LINUX_PLAYER.md`. All supplied
+NVIDIA software/model terms and third-party notices are retained in the
+extracted wheels. They are separate from this project's GPL source license.
+The public repository does not redistribute these packages or the generated
+application binary. Its download helper is not vendor certification of CachyOS
+desktop deployments or a claim of feature parity with the Windows application.
+
+The native adapter uses the public APIs documented at
+https://docs.nvidia.com/maxine/vfx/latest/Filters/VideoFrameGeneration.html
+and https://docs.nvidia.com/maxine/nvcvimage/latest/ .
+
 ## NVIDIA Video Frame Generation (local integration, 2026-10-03)
 
 `src/pipeline/VfgBackend.cpp` and `include/veyra/pipeline/VfgBackend.h` implement

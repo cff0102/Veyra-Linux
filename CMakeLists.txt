@@ -20,12 +20,19 @@ if(NOT VEYRA_DISPLAY_VERSION MATCHES "^${PROJECT_VERSION}")
 endif()
 
 # ---------------------------------------------------------------------------
-# Linux: the OBS filter module only. Every target below is COM / D3D11 / D3D12
+# Linux: OBS filter and optional native player. Every target below is COM / D3D11 / D3D12
 # / Win32 bound, so the portable part of the pipeline lives in linux/ instead
 # of growing ifdefs through 100k lines of Windows code. See docs/OBS_FILTER.md.
 # ---------------------------------------------------------------------------
 if(NOT WIN32)
-  add_subdirectory(linux/obs)
+  option(VEYRA_BUILD_LINUX_PLAYER "Build the experimental native Linux player" OFF)
+  option(VEYRA_BUILD_OBS_FILTER "Build the Linux OBS filter" ON)
+  if(VEYRA_BUILD_OBS_FILTER)
+    add_subdirectory(linux/obs)
+  endif()
+  if(VEYRA_BUILD_LINUX_PLAYER)
+    add_subdirectory(linux/player)
+  endif()
   return()
 endif()
 add_subdirectory(src/virtualcam)

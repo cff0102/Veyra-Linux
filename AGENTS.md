@@ -1,3 +1,24 @@
+# Linux fork working instructions
+
+This checkout includes an experimental native Linux player. For Linux work,
+use `docs/LINUX_PLAYER.md` and the root README as the current build/setup entry.
+The Windows maintainer paths and dated permissions below describe upstream's
+environment, not this Linux checkout or the current user's authorization.
+
+- Work with one agent unless the user explicitly asks for delegation.
+- Keep downloads, proprietary runtimes/models, build trees, tests and logs in
+  the sibling `Veyra-local` directory, outside source control. Preserve licenses.
+- Build with at most two jobs. Bound builds to 900 seconds and tests to 300.
+- Run the native GPU self-test for changes to interpolation/interop and a
+  synthetic playback test for changes to scheduling. Report hardware and
+  physical-console validation separately; counters are not measured display FPS.
+- Do not change drivers, system runtime files, user credentials, or console
+  settings as an incidental build step. Never commit pairing information.
+- Preserve upstream attribution and source licenses. The native player is a
+  partial SDR port; do not describe absent features as supported.
+
+# Upstream Windows maintainer notes
+
 # Veyra Agent 执行规则
 
 更新：2026-11-19。当前任务为整合各功能与修复至本地 main，版本源码 2.2.0。用户要求本轮先不构建。旧规则全文在[归档](docs/history/rules/AGENTS_before_main_2026-11-18.md)，其中带日期的施工树、版本与授权属于当时记录，不能覆盖用户后续指令。

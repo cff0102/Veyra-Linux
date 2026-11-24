@@ -1,5 +1,30 @@
 # 当前工作日志
 
+## 2026-11-23 Native Linux preview fork
+
+Added an opt-in Qt Multimedia/OpenGL player and native NVIDIA VFX adapter,
+leaving the Windows CMake branch and existing OBS-filter default intact.
+The GPU backend uploads owned pinned input buffers and shares output textures
+with OpenGL; generated-pixel readback is confined to the self-test. Source and
+display queues are bounded. Camera/format selection, external-window capture,
+local playback, 2x/4x VFG, sharpening, audio monitoring and fullscreen controls
+are available. Runtime downloads and build/test artifacts remain outside Git.
+
+Validation on CachyOS, Qt 6.12, RTX 5080, driver 615.78.08: native build passed;
+2x/4x GPU tests passed source-color identity, moving-object positions, scene-cut
+bypass, repeated calls and teardown. The synthetic 1080p 4x low-model sample
+averaged 2.28 ms/pair over 30 warmed pairs, max 2.34 ms; this is processing time,
+not end-to-end latency. A live scheduler test initially exposed interval/clock
+drift hiding generated frames. After re-anchoring to source arrival, a six-second
+demo reported 189 source frames, 564 generated, 748 submitted, zero source drops.
+Submitted frames are not optical/physical display measurements.
+
+Initial compilation found a missing QAudioDevice include. Initial offscreen GL
+probing required explicitly requesting desktop OpenGL. Both were corrected.
+The test entry points and exact reproducible setup are in `LINUX_PLAYER.md`.
+No PS5 pairing, real capture card, game latency, HDR, neural rendering, long
+session, other GPU or other distribution has been validated in this fork.
+
 ## 2026-11-20 Veyra 2.2.0 正式发行
 
 用户授权向 Likely7/Veyra-NRVideo 发布 2.2.0、精简 README 并把完整更新和已有对比图放在 Release。安装器分支 7ecb5d1d 合入发行树，WORKLOG 的追加冲突保留两边记录。运行程序、QML、着色器及依赖构建使用主线 41d1aeb6，其中生产源码与 ecbe0543 一致。从已验证配置重用依赖参数，只加入正式 Ed25519 验签公钥及关闭回环测试。命令入口为 `scripts/acceptance/build-recording-handoff.py --task codex-release-2.2.0-20261120 --label 2.2.0 --jobs 2 --reconfigure`，8 个目标 374.0 秒通过，回执在同任务 `logs/build-20261120-055915`。

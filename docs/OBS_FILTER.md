@@ -1,9 +1,9 @@
 # Veyra enhancement as an OBS filter
 
-Veyra's Windows runtime is a D3D12 application whose headline features are
-NGX-bound. On Linux the useful, portable part is the per-frame enhancement
-chain, and OBS already owns everything else (capture, decode, composition,
-encode). This module is that chain as an OBS video filter.
+Veyra's Windows runtime is a D3D12 application. This OBS module ports its
+spatial enhancement chain; OBS owns capture, decode, composition and encode.
+The separate [experimental Linux player](LINUX_PLAYER.md) now provides native
+NVIDIA VFX frame generation. It does not run inside this OBS filter.
 
 The Windows build is untouched: the root `CMakeLists.txt` takes the Windows
 branch and only `add_subdirectory(linux/obs)` on other platforms.
@@ -87,9 +87,9 @@ no-op, which is the algorithm behaving as designed rather than a missing pass.
 
 | Windows feature | Linux |
 | --- | --- |
-| DLSS SR/FG, RTX Video SR/HDR, DeepDVC, optical flow | NGX has no public Linux SDK — not portable |
-| Neural NR (`src/ngx/DlssNrRuntimeAdapter.cpp`) | same NGX dependency |
+| DLSS SR/FG, RTX Video SR/HDR, DeepDVC, optical flow | Not implemented in this OBS filter; availability of Linux SDKs varies by feature |
+| Neural NR (`src/ngx/DlssNrRuntimeAdapter.cpp`) | Windows adapter has not been ported |
 | SMAA/MLAA | portable shader maths, not implemented here |
 | FSR/XeSS super resolution | needs an upscaling stage; as a same-size filter it would only soften |
-| Frame generation | not meaningful inside a filter |
+| Frame generation | Requires ownership of frame scheduling; available experimentally in the separate native player |
 | Capture, record/export, subtitles, streaming, node graph, presets | OBS owns these |
